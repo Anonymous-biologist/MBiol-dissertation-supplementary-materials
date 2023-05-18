@@ -1,0 +1,203 @@
+---
+title: "Fluorescence quantification variability"
+author: "Alexander Tchernev"
+date: "2023-04-07"
+output: html_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load necessary packages
+```{r}
+?separate_wider_delim
+library(dplyr) # for various useful data manipulation functions
+library(ggplot2) # 
+library(readr) # for "read_csv" function
+library(tidyr) # for tidying messy data
+```
+
+# Read in the csv files with the fluorescence quantification variability data
+```{r}
+# GFP filter set data
+GFP = read_csv("D:/Oxford/4th-year Project/Results/Images/Fluorescence/Measurement variability quantification/Results - GFP variability.csv")
+
+# mCherry filter set data
+mCherry = read_csv("D:/Oxford/4th-year Project/Results/Images/Fluorescence/Measurement variability quantification/Results - mCherry variability.csv")
+```
+
+# Create columns for day, group, plate, and whether the ROI is background or not
+```{r}
+# For GFP
+for(i in 1:length(GFP$Label)){
+  GFP$Day[i] = case_when( # column for day
+    grepl("D6", GFP$Label[i]) ~ 6,
+    grepl("D10", GFP$Label[i]) ~ 10,
+    grepl("D13", GFP$Label[i]) ~ 13,
+    grepl("D17", GFP$Label[i]) ~ 17,
+    grepl("D25", GFP$Label[i]) ~ 25,
+    grepl("D27", GFP$Label[i]) ~ 27,
+    grepl("D29", GFP$Label[i]) ~ 29,
+    grepl("D31", GFP$Label[i]) ~ 31,
+    grepl("D33", GFP$Label[i]) ~ 33,
+    grepl("D35", GFP$Label[i]) ~ 35,
+    grepl("D37", GFP$Label[i]) ~ 37
+    )
+  GFP$Group[i] = case_when( # column for group
+    grepl("Con", GFP$Label[i]) ~ "Control",
+    grepl("_CR_", GFP$Label[i]) ~ "CR",
+    grepl("_MET_", GFP$Label[i]) ~ "MET",
+    grepl("_NMN_", GFP$Label[i]) ~ "NMN",
+    grepl("MET\\+NMN_", GFP$Label[i]) ~ "MET + NMN",
+    grepl("_MET\\+CR", GFP$Label[i]) ~ "MET + CR",
+    grepl("_NMN\\+CR", GFP$Label[i]) ~ "NMN + CR",
+    grepl("MET\\+NMN\\+CR", GFP$Label[i]) ~ "MET + NMN + CR"
+    )
+  GFP$Plate[i] = case_when( # column for plate
+    grepl("P1", GFP$Label[i]) ~ 1,
+    grepl("P2", GFP$Label[i]) ~ 2,
+    grepl("P3", GFP$Label[i]) ~ 3,
+    grepl("P4", GFP$Label[i]) ~ 4,
+    grepl("P5", GFP$Label[i]) ~ 5
+    )
+  GFP$Background[i] = case_when( # column for background
+    grepl("Background", GFP$Label[i]) ~ TRUE,
+    TRUE ~ FALSE
+    )
+}
+
+# Do the same for mCherry
+for(i in 1:length(mCherry$Label)){
+  mCherry$Day[i] = case_when(
+    grepl("D6", mCherry$Label[i]) ~ 6,
+    grepl("D10", mCherry$Label[i]) ~ 10,
+    grepl("D13", mCherry$Label[i]) ~ 13,
+    grepl("D17", mCherry$Label[i]) ~ 17,
+    grepl("D25", mCherry$Label[i]) ~ 25,
+    grepl("D27", mCherry$Label[i]) ~ 27,
+    grepl("D29", mCherry$Label[i]) ~ 29,
+    grepl("D31", mCherry$Label[i]) ~ 31,
+    grepl("D33", mCherry$Label[i]) ~ 33,
+    grepl("D35", mCherry$Label[i]) ~ 35,
+    grepl("D37", mCherry$Label[i]) ~ 37
+    )
+  mCherry$Group[i] = case_when(
+    grepl("Con", mCherry$Label[i]) ~ "Control",
+    grepl("_CR_", mCherry$Label[i]) ~ "CR",
+    grepl("_MET_", mCherry$Label[i]) ~ "MET",
+    grepl("_NMN_", mCherry$Label[i]) ~ "NMN",
+    grepl("MET\\+NMN_", mCherry$Label[i]) ~ "MET + NMN",
+    grepl("_MET\\+CR", mCherry$Label[i]) ~ "MET + CR",
+    grepl("_NMN\\+CR", mCherry$Label[i]) ~ "NMN + CR",
+    grepl("MET\\+NMN\\+CR", mCherry$Label[i]) ~ "MET + NMN + CR"
+    )
+  mCherry$Plate[i] = case_when(
+    grepl("P1", mCherry$Label[i]) ~ 1,
+    grepl("P2", mCherry$Label[i]) ~ 2,
+    grepl("P3", mCherry$Label[i]) ~ 3,
+    grepl("P4", mCherry$Label[i]) ~ 4,
+    grepl("P5", mCherry$Label[i]) ~ 5
+    )
+  mCherry$Background[i] = case_when(
+    grepl("Background", mCherry$Label[i]) ~ TRUE,
+    TRUE ~ FALSE
+    )
+}
+```
+
+# Subtracting the background fluorescence values from the worm ROIs
+```{r}
+# Create copies of the tibbles
+GFP_subtracted = GFP
+mCherry_subtracted = mCherry
+
+# Create an empty vector that will hold the row numbers for all the ROIs from which a specific background value has to be subtracted
+br = c()
+
+# Create a "for" loop that goes through each GFP ROI
+for(i in 1:length(GFP_subtracted$Label)){
+  if(GFP_subtracted$Background[i] == FALSE){
+    br = c(br, i) # if it is not a background ROI, add the row number of the ROI to the vector
+  }
+  else{
+    for(j in 1:length(br)){
+      GFP_subtracted$Mean[br[j]] = (GFP_subtracted$Mean[br[j]] - GFP_subtracted$Mean[i]) # if it is a background ROI, subtract its value from all the ROIs with row numbers stored in the vector
+    }
+    br = c() # reset the vector to empty, so that it can be used to store the row numbers of the next batch of ROIs to be subtracted from the next background ROI
+  }
+}
+
+# Do the same for the mCherry data set
+for(i in 1:length(mCherry_subtracted$Label)){
+  if(mCherry_subtracted$Background[i] == FALSE){
+    br = c(br, i)
+  }
+  else{
+    for(j in 1:length(br)){
+      mCherry_subtracted$Mean[br[j]] = (mCherry_subtracted$Mean[br[j]] - mCherry_subtracted$Mean[i])
+    }
+    br = c()
+  }
+}
+```
+
+# Remove background ROIs
+```{r}
+GFP_subtracted = filter(GFP_subtracted, Background == FALSE)
+
+mCherry_subtracted = filter(mCherry_subtracted, Background == FALSE)
+```
+
+# Create two new columns - one containing the Label info (without the specific ROI info) and one containing the specific ROI info
+```{r}
+GFP_subtracted = separate_wider_delim(data = GFP_subtracted, cols = "Label", delim = ".", names = c("Plate_ID", "ROI"), cols_remove = FALSE)
+
+mCherry_subtracted = separate_wider_delim(data = mCherry_subtracted, cols = "Label", delim = ".", names = c("Plate_ID", "ROI"), cols_remove = FALSE)
+```
+
+# Calculate the mean fluorescence intensity for the worms on each plate
+```{r}
+GFP_summary = GFP_subtracted %>% group_by(Batch, Plate_ID) %>% summarise(Mean_fluo = mean(Mean))
+
+mCherry_summary = mCherry_subtracted %>% group_by(Batch, Plate_ID) %>% summarise(Mean_fluo = mean(Mean))
+```
+
+# Make two tibbles (one for GFP and one for mCherry) that contain the batch fluorescence values for each plate in separate columns. Remove unnecessary columns from the tibbles after they are constructed.
+```{r}
+GFP_comp = merge(GFP_summary %>% filter(Batch == 1) %>% dplyr::rename("Mean_1" = "Mean_fluo"), GFP_summary %>% filter(Batch == 2) %>% dplyr::rename("Mean_2" = "Mean_fluo"), by = "Plate_ID") %>% select(-c(Batch.x, Batch.y))
+
+mCherry_comp = merge(mCherry_summary %>% filter(Batch == 1) %>% dplyr::rename("Mean_1" = "Mean_fluo"), mCherry_summary %>% filter(Batch == 2) %>% dplyr::rename("Mean_2" = "Mean_fluo"), by = "Plate_ID") %>% select(-c(Batch.x, Batch.y))
+```
+
+# Plot GFP fluorescence values from both batches and perform a correlation test
+```{r}
+ggplot(GFP_comp, aes(x = Mean_1, y = Mean_2)) +
+  geom_point()
+
+# Correlation test with sqrt-transformed fluorescence values (as in the models that are fitted in the main analysis)
+cor.test(sqrt(GFP_comp$Mean_1), sqrt(GFP_comp$Mean_2))
+```
+
+# Plot mCherry fluorescence values from both batches and perform a correlation test
+```{r}
+ggplot(mCherry_comp, aes(x = Mean_1, y = Mean_2)) +
+  geom_point()
+
+# Correlation test with sqrt-transformed fluorescence values (as in the models that are fitted in the main analysis)
+cor.test(sqrt(mCherry_comp$Mean_1), sqrt(mCherry_comp$Mean_2))
+```
+
+# Correlation test with the combined random samples from the GFP and mCherry data sets
+```{r}
+# Merge the data sets together
+df = merge(GFP_comp, mCherry_comp, by = c("Plate_ID", "Mean_1", "Mean_2"), all = TRUE)
+
+# Plot the data
+ggplot(df, aes(x = Mean_1, y = Mean_2)) +
+  geom_point()
+
+# Correlation test with sqrt-transformed fluorescence values (as in the models that are fitted in the main analysis)
+cor.test(sqrt(df$Mean_1), sqrt(df$Mean_2))
+```
+
