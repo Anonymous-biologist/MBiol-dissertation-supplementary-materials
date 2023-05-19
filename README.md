@@ -1,6 +1,6 @@
 # MBiol dissertation supplementary materials
 
-This repository contains supplementary materials for the MBiol dissertation titled "Interactions between anti-ageing interventions in Caenorhabditis elegans".
+This repository contains supplementary materials for the MBiol dissertation titled "Interactions between anti-ageing interventions in *Caenorhabditis elegans*".
 
 List of the supplementary materials provided:
 - R code files:
