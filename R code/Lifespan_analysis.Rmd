@@ -1,0 +1,1423 @@
+---
+title: "Lifespan analysis"
+date: "2023-02-13"
+output: html_document
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load necessary packages
+```{r}
+library(afex) # for coefficient p-values to be shown in the mixed model summary
+library(biostat3) # for life tables
+library(dplyr) # for various useful data manipulation functions
+library(emmeans) # for estimated marginal means
+library(forcats) # for reordering factors
+library(ggplot2) # for plotting
+library(RColorBrewer) # for colour blind-friendly palettes
+library(readr) # for "read_csv" function
+library(reshape) # for reshaping data
+library(stringr) # for operations on strings
+library(survminer) # for making "ready-to-publish" survival curves
+library(survival) # for log-rank test
+```
+
+# Load data
+```{r}
+Celegans = read_csv('D:/Oxford/4th-year Project/Results/Lifespan.csv')
+```
+
+# Have a look at the data
+```{r}
+Celegans
+```
+
+# Replace "_" with " + " in the data
+```{r}
+Celegans = Celegans %>% mutate(Group = str_replace_all(Group, "_", " + "))
+```
+
+# Reorder the groups in a more logical way
+```{r}
+Celegans = mutate(Celegans, Group = fct_relevel(Group, "Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"))
+```
+
+# Compare all groups while stratifying by contamination level ("Low" or "High")
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Group + strata(Contam_Level_Binary), Celegans)
+```
+
+# Create a colour blind friendly palette
+```{r}
+# Have a look at the available colour blind-friendly palettes
+display.brewer.all(colorblindFriendly = TRUE)
+
+# See the HEX codes for the chosen colour blind-friendly palette
+brewer.pal(12, "Paired")
+
+# Specify the colours for each group
+cb_friendly_palette = c("Control" = "#FF7F00", "MET" = "#B2DF8A", "NMN" = "#A6CEE3", "CR" = "#FB9A99", "MET + NMN" = "#33A02C", "MET + CR" = "#E31A1C", "NMN + CR" = "#1F78B4", "MET + NMN + CR" = "#000000")
+```
+
+# Compare group MEDIANS for different levels of contamination ("Low" or "High") and for all observations
+
+## Survival curves for all groups while stratifying by contamination level ("Low" or "High")
+```{r}
+fit_strat_all = survfit(Surv(Time, NaturalDeath) ~ Group + strata(Contam_Level_Binary), Celegans)
+print(fit_strat_all)
+```
+
+## Tibble with the median lifespan and 95% CIs for "Low" contamination
+```{r}
+median_95CI_low = tibble(Group = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"), 
+                          Median = c(21, 21, 21, 19, 21, 11, 29, 29), 
+                          Lower_bound_95CI = c(21, 21, 21, 19, 21, 6, 25, 24), 
+                          Upper_bound_95CI = c(21, 21, 21, 21, 21, 14, 32, 33))
+```
+
+## Tibble with the median lifespan and 95% CIs for "High" contamination
+```{r}
+median_95CI_high = tibble(Group = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"), 
+                          Median = c(NA, 15, 21, 15, 17, 17, 19, 16), 
+                          Lower_bound_95CI = c(NA, 15, 19, 14, 14, 14, 18, 15), 
+                          Upper_bound_95CI = c(NA, 18, 24, NA, 19, 19, 21, 19))
+```
+
+## Reorder the group names so that they have a logical order when the data is plotted
+```{r}
+# Reorder the group names in the "High" contamination groups
+median_95CI_low = mutate(median_95CI_low, Group = fct_relevel(Group, "Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"))
+
+# Reorder the group names in the "High" contamination groups
+median_95CI_high = mutate(median_95CI_high, Group = fct_relevel(Group, "Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"))
+```
+
+## Plot the median values and CIs for all groups with "Low" contamination
+```{r}
+ggplot(median_95CI_low, aes(x = Median, y = Group, colour = Group)) + 
+    geom_errorbar(aes(xmin = Lower_bound_95CI, xmax = Upper_bound_95CI), width = 0.5, size = 1) +
+    geom_point(size = 3) +
+    xlim(1.55, 33) +
+    ggtitle("Median survival by group") +
+    xlab("Median survival time (days)") +
+    scale_y_discrete(limits = rev(levels(median_95CI_low$Group))) +
+    theme_bw() + 
+    theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5), 
+          axis.text = element_text(size = 10), 
+          axis.title = element_text(size = 12), 
+          axis.title.x = element_text(vjust = -1), 
+          axis.title.y = element_blank(), 
+          legend.title = element_blank()) +
+    scale_x_continuous(expand = c(0, 0), limits = c(5, 35)) +
+    scale_colour_manual(values = cb_friendly_palette)
+```
+
+## Plot the median values and CIs for all groups with "High" contamination
+```{r}
+ggplot(median_95CI_high, aes(x = Median, y = Group, colour = Group)) + 
+    geom_errorbar(aes(xmin = Lower_bound_95CI, xmax = Upper_bound_95CI), width = 0.5, size = 1) +
+    geom_point(size = 3) +
+    xlim(1.55, 33) +
+    ggtitle("Median survival times for plates with high contamination\n") +
+    scale_y_discrete(limits = rev(levels(median_95CI_high$Group))) +
+    theme_bw() + 
+    theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5), 
+          axis.text = element_text(size = 10), 
+          axis.title = element_text(face = "bold", size = 12)) +
+    scale_colour_manual(values = cb_friendly_palette)
+```
+
+
+
+# LOW contamination - Calculate p-values & plot survival curves of interest
+
+## Subset the "Low" contamination plates
+```{r}
+Celegans_low = filter(Celegans, !(Contam_Level %in% c("Reasonable", "Extensive")))
+```
+
+## Control vs MET
+```{r}
+Celegans_low_C_vs_MET = filter(Celegans_low, Group %in% c("Control", "MET"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_C_vs_MET)
+```
+
+Survival curves
+```{r}
+C_vs_MET_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_C_vs_MET)
+
+ggsurvplot(C_vs_MET_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata", # Change line type by groups
+           surv.median.line = "hv", # Specify median survival
+           ggtheme = theme_bw(), # Change ggplot2 theme
+           legend.labs = c("Control", "MET"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## Control vs NMN
+```{r}
+Celegans_low_C_vs_NMN = filter(Celegans_low, Group %in% c("Control", "NMN"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_C_vs_NMN)
+```
+
+Survival curves
+```{r}
+C_vs_NMN_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_C_vs_NMN)
+
+ggsurvplot(C_vs_NMN_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("Control", "NMN"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## Control vs CR
+```{r}
+Celegans_low_C_vs_CR = filter(Celegans_low, Group %in% c("Control", "CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_C_vs_CR)
+```
+
+Survival curves
+```{r}
+C_vs_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_C_vs_CR)
+
+ggsurvplot(C_vs_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("Control", "CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## Control vs MET + NMN
+```{r}
+Celegans_low_C_vs_MET_NMN = filter(Celegans_low, Group %in% c("Control", "MET + NMN"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_C_vs_MET_NMN)
+```
+
+Survival curves
+```{r}
+C_vs_MET_NMN_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_C_vs_MET_NMN)
+
+ggsurvplot(C_vs_MET_NMN_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("Control", "MET + NMN"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## Control vs MET + CR
+```{r}
+Celegans_low_C_vs_MET_CR = filter(Celegans_low, Group %in% c("Control", "MET + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_C_vs_MET_CR)
+```
+
+Survival curves
+```{r}
+C_vs_MET_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_C_vs_MET_CR)
+
+ggsurvplot(C_vs_MET_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("Control", "MET + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## Control vs NMN + CR
+```{r}
+Celegans_low_C_vs_NMN_CR = filter(Celegans_low, Group %in% c("Control", "NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_C_vs_NMN_CR)
+```
+
+Survival curves
+```{r}
+C_vs_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_C_vs_NMN_CR)
+
+ggsurvplot(C_vs_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("Control", "NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## Control vs MET + NMN + CR
+```{r}
+Celegans_low_C_vs_MET_NMN_CR = filter(Celegans_low, Group %in% c("Control", "MET + NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_C_vs_MET_NMN_CR)
+```
+
+Survival curves
+```{r}
+C_vs_MET_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_C_vs_MET_NMN_CR)
+
+ggsurvplot(C_vs_MET_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("Control", "MET + NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET vs NMN
+```{r}
+Celegans_low_MET_vs_NMN = filter(Celegans_low, Group %in% c("MET", "NMN"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_vs_NMN)
+```
+
+Survival curves
+```{r}
+MET_vs_NMN_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_vs_NMN)
+
+ggsurvplot(MET_vs_NMN_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET", "NMN"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET vs CR
+```{r}
+Celegans_low_MET_vs_CR = filter(Celegans_low, Group %in% c("MET", "CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_vs_CR)
+```
+
+Survival curves
+```{r}
+MET_vs_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_vs_CR)
+
+ggsurvplot(MET_vs_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("CR", "MET"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET vs MET + NMN
+```{r}
+Celegans_low_MET_vs_MET_NMN = filter(Celegans_low, Group %in% c("MET", "MET + NMN"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_vs_MET_NMN)
+```
+
+Survival curves
+```{r}
+MET_vs_MET_NMN_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_vs_MET_NMN)
+
+ggsurvplot(MET_vs_MET_NMN_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET", "MET + NMN"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET vs MET + CR
+```{r}
+Celegans_low_MET_vs_MET_CR = filter(Celegans_low, Group %in% c("MET", "MET + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_vs_MET_CR)
+```
+
+Survival curves
+```{r}
+MET_vs_MET_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_vs_MET_CR)
+
+ggsurvplot(MET_vs_MET_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET", "MET + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET vs NMN + CR
+```{r}
+Celegans_low_MET_vs_NMN_CR = filter(Celegans_low, Group %in% c("MET", "NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_vs_NMN_CR)
+```
+
+Survival curves
+```{r}
+MET_vs_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_vs_NMN_CR)
+
+ggsurvplot(MET_vs_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET", "NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET vs MET + NMN + CR
+```{r}
+Celegans_low_MET_vs_MET_NMN_CR = filter(Celegans_low, Group %in% c("MET", "MET + NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_vs_MET_NMN_CR)
+```
+
+Survival curves
+```{r}
+MET_vs_MET_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_vs_MET_NMN_CR)
+
+ggsurvplot(MET_vs_MET_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET", "MET + NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## NMN vs CR
+```{r}
+Celegans_low_NMN_vs_CR = filter(Celegans_low, Group %in% c("NMN", "CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_NMN_vs_CR)
+```
+
+Survival curves
+```{r}
+NMN_vs_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_NMN_vs_CR)
+
+ggsurvplot(NMN_vs_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("CR", "NMN"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## NMN vs MET + NMN
+```{r}
+Celegans_low_NMN_vs_MET_NMN = filter(Celegans_low, Group %in% c("NMN", "MET + NMN"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_NMN_vs_MET_NMN)
+```
+
+Survival curves
+```{r}
+NMN_vs_MET_NMN_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_NMN_vs_MET_NMN)
+
+ggsurvplot(NMN_vs_MET_NMN_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("NMN", "MET + NMN"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## NMN vs MET + CR
+```{r}
+Celegans_low_NMN_vs_MET_CR = filter(Celegans_low, Group %in% c("NMN", "MET + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_NMN_vs_MET_CR)
+```
+
+Survival curves
+```{r}
+NMN_vs_MET_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_NMN_vs_MET_CR)
+
+ggsurvplot(NMN_vs_MET_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("NMN", "MET + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## NMN vs NMN + CR
+```{r}
+Celegans_low_NMN_vs_NMN_CR = filter(Celegans_low, Group %in% c("NMN", "NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_NMN_vs_NMN_CR)
+```
+
+Survival curves
+```{r}
+NMN_vs_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_NMN_vs_NMN_CR)
+
+ggsurvplot(NMN_vs_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("NMN", "NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## NMN vs MET + NMN + CR
+```{r}
+Celegans_low_NMN_vs_MET_NMN_CR = filter(Celegans_low, Group %in% c("NMN", "MET + NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_NMN_vs_MET_NMN_CR)
+```
+
+Survival curves
+```{r}
+NMN_vs_MET_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_NMN_vs_MET_NMN_CR)
+
+ggsurvplot(NMN_vs_MET_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("NMN", "MET + NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## CR vs MET + NMN
+```{r}
+Celegans_low_CR_vs_MET_NMN = filter(Celegans_low, Group %in% c("CR", "MET + NMN"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_CR_vs_MET_NMN)
+```
+
+Survival curves
+```{r}
+CR_vs_MET_NMN_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_CR_vs_MET_NMN)
+
+ggsurvplot(CR_vs_MET_NMN_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("CR", "MET + NMN"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## CR vs MET + CR
+```{r}
+Celegans_low_CR_vs_MET_CR = filter(Celegans_low, Group %in% c("CR", "MET + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_CR_vs_MET_CR)
+```
+
+Survival curves
+```{r}
+CR_vs_MET_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_CR_vs_MET_CR)
+
+ggsurvplot(CR_vs_MET_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("CR", "MET + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## CR vs NMN + CR
+```{r}
+Celegans_low_CR_vs_NMN_CR = filter(Celegans_low, Group %in% c("CR", "NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_CR_vs_NMN_CR)
+```
+
+Survival curves
+```{r}
+CR_vs_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_CR_vs_NMN_CR)
+
+ggsurvplot(CR_vs_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("CR", "NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## CR vs MET + NMN + CR
+```{r}
+Celegans_low_CR_vs_MET_NMN_CR = filter(Celegans_low, Group %in% c("CR", "MET + NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_CR_vs_MET_NMN_CR)
+```
+
+Survival curves
+```{r}
+CR_vs_MET_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_CR_vs_MET_NMN_CR)
+
+ggsurvplot(CR_vs_MET_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("CR", "MET + NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET + NMN vs MET + CR
+```{r}
+Celegans_low_MET_NMN_vs_MET_CR = filter(Celegans_low, Group %in% c("MET + NMN", "MET + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_NMN_vs_MET_CR)
+```
+
+Survival curves
+```{r}
+MET_NMN_vs_MET_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_NMN_vs_MET_CR)
+
+ggsurvplot(MET_NMN_vs_MET_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET + NMN", "MET + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET + NMN vs NMN + CR
+```{r}
+Celegans_low_MET_NMN_vs_NMN_CR = filter(Celegans_low, Group %in% c("MET + NMN", "NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_NMN_vs_NMN_CR)
+```
+
+Survival curves
+```{r}
+MET_NMN_vs_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_NMN_vs_NMN_CR)
+
+ggsurvplot(MET_NMN_vs_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET + NMN", "NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET + NMN vs MET + NMN + CR
+```{r}
+Celegans_low_MET_NMN_vs_MET_NMN_CR = filter(Celegans_low, Group %in% c("MET + NMN", "MET + NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_NMN_vs_MET_NMN_CR)
+```
+
+Survival curves
+```{r}
+MET_NMN_vs_MET_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_NMN_vs_MET_NMN_CR)
+
+ggsurvplot(MET_NMN_vs_MET_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET + NMN", "MET + NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET + CR vs NMN + CR
+```{r}
+Celegans_low_MET_CR_vs_NMN_CR = filter(Celegans_low, Group %in% c("MET + CR", "NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_CR_vs_NMN_CR)
+```
+
+Survival curves
+```{r}
+MET_CR_vs_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_CR_vs_NMN_CR)
+
+ggsurvplot(MET_CR_vs_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET + CR", "NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## MET + CR vs MET + NMN + CR
+```{r}
+Celegans_low_MET_CR_vs_MET_NMN_CR = filter(Celegans_low, Group %in% c("MET + CR", "MET + NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_MET_CR_vs_MET_NMN_CR)
+```
+
+Survival curves
+```{r}
+MET_CR_vs_MET_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_MET_CR_vs_MET_NMN_CR)
+
+ggsurvplot(MET_CR_vs_MET_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("MET + CR", "MET + NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+## NMN + CR vs MET + NMN + CR
+```{r}
+Celegans_low_NMN_CR_vs_MET_NMN_CR = filter(Celegans_low, Group %in% c("NMN + CR", "MET + NMN + CR"))
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans_low_NMN_CR_vs_MET_NMN_CR)
+```
+
+Survival curves
+```{r}
+NMN_CR_vs_MET_NMN_CR_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low_NMN_CR_vs_MET_NMN_CR)
+
+ggsurvplot(NMN_CR_vs_MET_NMN_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("NMN + CR", "MET + NMN + CR"),
+           xlab = "Day", 
+           palette = cb_friendly_palette)
+```
+
+
+
+# P-value heat map - LOW contamination
+
+## Create a matrix containing all the p-values for the pairwise group comparisons for "Low" contamination plates
+```{r}
+p_low = matrix(
+  c(0, 0.00004, 0.8, 0.02, 0.0002, 0.0000000000000007, 0.00000000007, 0.000000000002, 
+    0, 0, 0.0009, 0.0000008, 0.4, 0.0000000000000002, 0.0000001, 0.00000002, 
+    0, 0, 0, 0.02, 0.002, 0.000000000000001, 0.00000005, 0.0000000006, 
+    0, 0, 0, 0, 0.000002, 0.000000006, 0.00000001, 0.00000000002, 
+    0, 0, 0, 0, 0, 0.0000000000000002, 0.000000005, 0.000000003, 
+    0, 0, 0, 0, 0, 0, 0.000000001, 0.0000000000000007, 
+    0, 0, 0, 0, 0, 0, 0, 0.5, 
+    0, 0, 0, 0, 0, 0, 0, 0),
+  nrow = 8, # Number of rows
+  ncol = 8 # Number of columns   
+)
+
+# NOTE: In the above matrix, the values for MET + NMN vs MET + CR and for MET vs MET + CR were lower than 2e-16, but we don't know how much lower.
+
+# Name the rows
+rownames(p_low) = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR")
+
+# Name the columns
+colnames(p_low) = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR")
+
+# Perform a Bonferroni correction for multiple comparisons by multiplying all values by 28 (the number of comparisons performed)
+p_low = p_low*28
+
+# Go through the matrix and set any p-values that exceed 1 to 1
+for(i in 1:nrow(p_low)) {
+  for(j in 1:ncol(p_low)) {
+    if(!is.na(p_low[i, j])){ # only compare non-NA elements to 1, as you cannot compare NAs to a number
+      if(p_low[i, j] > 1){
+        p_low[i, j] = 1
+      }
+    }
+  }
+}
+
+# Print out the 8x8 matrix
+cat("The 8x8 matrix:\n")
+print(p_low)
+```
+
+## Create a heatmap of the p-values for the pairwise group comparisons for "Low" contamination plates
+```{r}
+# Create a colour blind-friendly palette for the plot
+cb_friendly_p_val = c("(0, 0.0001]" = "#08306B", 
+                      "(0.0001, 0.001]" = "#08519C", 
+                      "(0.001, 0.01]" = "#2171B5", 
+                      "(0.01, 0.05]" = "#4292C6", 
+                      "(0.05, 1]" = "#A50026", 
+                      " " = "white")
+
+# Transform the matrix into a data frame
+p_val_melt = melt.matrix(p_low)
+
+# Convert the group names into factors
+p_val_melt$X1 = as.factor(p_val_melt$X1)
+p_val_melt$X2 = as.factor(p_val_melt$X2)
+
+# Create a new column that categorises the p-values
+p_val_melt$value_cat = cut(p_val_melt$value, 
+                           breaks = c(0, 0.0001, 0.001, 0.01, 0.05, 1), 
+                           right = TRUE)
+
+# Add a space between the numbers denoting the interval categories
+p_val_melt$value_cat = str_replace_all(p_val_melt$value_cat, ",", ", ")
+
+# Assign all the comparisons for which a p-value of 0 was provided (and hence had NAs assigned to them in the new column) the level " " in the new column
+p_val_melt[is.na(p_val_melt$value_cat), ]$value_cat = " "
+
+# Convert back to factor (as the above manipulations changed it to character) and re-specify the factor levels
+p_val_melt$value_cat = factor(p_val_melt$value_cat, 
+                                 levels = c("(0, 0.0001]", 
+                                 "(0.0001, 0.001]", 
+                                 "(0.001, 0.01]", 
+                                 "(0.01, 0.05]", 
+                                 "(0.05, 1]", 
+                                 " "))
+
+# Convert the precise p-values into scientific format with one decimal place
+p_val_melt$value = format(p_val_melt$value, format = "e", digits = 2)
+
+# Plot the p-values
+ggplot(p_val_melt, aes(X1, X2)) +
+  geom_tile(aes(fill = value_cat), color = "white", size = 0.5) +
+  geom_text(aes(label = value), size = 3, colour = "white") +
+  scale_fill_manual(values = cb_friendly_p_val, drop = FALSE) +
+  labs(fill = "p-value") +
+  ggtitle("P-values for survival curve comparisons") +
+  theme(axis.line = element_blank(), 
+        axis.text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), 
+        axis.ticks = element_blank(), 
+        axis.title = element_blank(), 
+        legend.key = element_rect(fill = "white"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+
+
+# Survival curves for LOW contamination
+
+## Compute survival curves
+```{r}
+fit_all_low = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans_low)
+print(fit_all_low)
+```
+
+## Plot survival curves
+```{r}
+(ggsurvplot(fit_all_low, 
+            conf.int = TRUE, 
+            legend.labs = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"), 
+            xlab = "Day of adulthood", 
+            palette = cb_friendly_palette)$plot + 
+   ggtitle("Survival curves by group") +
+   theme_bw() + 
+   theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5), 
+         axis.text = element_text(size = 10), 
+         axis.title = element_text(size = 12), 
+         axis.title.x = element_text(vjust = -1), 
+         axis.title.y = element_text(vjust = 3), 
+         legend.title = element_blank()) +
+   facet_wrap(~strata))
+```
+
+
+
+# Single interventions vs intervention combinations
+```{r}
+# Filter out the controls
+Celegans_low_no_C = filter(Celegans_low, Ind_vs_Comb != "Control")
+
+# Compute the survival curves
+ind_vs_comb_low = survfit(Surv(Time, NaturalDeath) ~ Ind_vs_Comb, data = Celegans_low_no_C)
+
+# Print information about the survival curves
+print(ind_vs_comb_low)
+
+# Print the survival curves
+ggsurvplot(ind_vs_comb_low,
+           pval = TRUE, conf.int = TRUE, 
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("Combinations", "Single"),
+           xlab = "Day", 
+           palette = c("Single" = "#FDBF6F", "Combinations" = "#B15928"))
+```
+
+
+
+# Try again when MET + CR is excluded, as it is probably highly lowering the average survival curve for the intervention combinations
+```{r}
+# Filter out MET + CR
+Celegans_low_no_C_no_MET_CR = filter(Celegans_low_no_C, Group != "MET + CR")
+
+# Compute the survival curves
+ind_vs_comb_no_C_no_MET_CR_low = survfit(Surv(Time, NaturalDeath) ~ Ind_vs_Comb, data = Celegans_low_no_C_no_MET_CR)
+
+# Print information about the survival curves
+print(ind_vs_comb_no_C_no_MET_CR_low)
+
+# Plot survival curves
+ggsurvplot(ind_vs_comb_no_C_no_MET_CR_low,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           legend.labs = c("Combinations", "Single"),
+           xlab = "Day", 
+           palette = c("Single" = "#FDBF6F", "Combinations" = "#B15928"))
+```
+
+# MODELLING - LOW contamination
+
+## All main and interactive effects, as well as plate as a random effect
+```{r}
+# Use means to determine whether the interactive effects are additive, antagonistic, or synergistic because:
+
+# 1. The lifespan distribution for the individual groups are fairly symmetric (so the mean is approximately the same as the median in all groups)
+
+## Check the above by plotting histograms of the times of death for each group
+ggplot(data = filter(Celegans_low, NaturalDeath == 1), aes(x = Time, fill = Group)) +
+  geom_histogram() +
+  facet_wrap(~Group) +
+  scale_fill_manual(values = cb_friendly_palette)
+
+
+
+# 2. The level of censoring is very low overall (6%) and by group (maximum 15% in the NMN + CR group)
+
+## Calculating the overall percentage of worms that were censored
+length(filter(Celegans_low, NaturalDeath == 0)$Group)/length(Celegans_low$Group)*100
+
+## Calculating the percentage of worms that were censored in each group
+groups = unique(Celegans_low$Group)
+for(i in 1:length(groups)){
+  cat(groups[i], " - ", length(filter(Celegans_low, Group == groups[i] & NaturalDeath == 0)$Group)/length(filter(Celegans_low, Group == groups[i])$Group)*100, "%      ", sep = "")
+}
+
+# Make PlateGroup a factor variable so that the model can be fitted
+Celegans_low$PlateGroup = as.factor(Celegans_low$PlateGroup)
+
+# Model with:
+# - fixed effects: each individual treatment on its own, and all the possible interactions between the individual treatments
+# - random effect: plate
+lm_all = lmer(Time ~ MET + NMN + CR + MET*NMN + MET*CR + NMN*CR + MET*NMN*CR + (1|PlateGroup), data = filter(Celegans_low, NaturalDeath == 1), REML = F)
+
+# View the model summary
+summary(lm_all)
+
+# CONCLUSIONS: From the model summary (which deals with the means for the groups), it seems that:
+# - the means for the MET and NMN single intervention groups are significantly different from the mean for the control group.
+# - the mean for the CR single intervention group is significantly different from the mean for the control group.
+# - the interaction between MET and NMN is not significantly different from 0, suggesting additive effects of MET and NMN.
+# - the interaction between MET and CR is significantly different from 0. Specifically, it seems to be highly antagonistic.
+# - the interaction between NMN and CR is significantly different from 0. Specifically, it seems to be highly synergistic.
+# - the three-way interaction between MET, NMN, and CR is significantly different from 0. Specifically, it seems to be synergistic.
+
+# CAVEAT: Far fewer distinct times of death determined in the period when the mean lifespan for most groups lies - therefore, there might be a lot more significant interactions if those data had been collected.
+```
+
+## Checking the assumptions of the model
+```{r}
+# ASSUMPTIONS
+# - Homoscedasticity (residuals have constant variance)
+# - No outliers
+# - Linearity
+
+## have a look at the distribution of the residuals for all fitted values
+plot(lm_all) # seem normally distributed around 0
+
+
+# ASSUMPTION: The residuals are normally distributed
+
+## Extract the residuals and plot them as a histogram
+res = resid(lm_all)
+hist(res) # seem normally distributed
+
+## Also check residual normality with a q-q plot
+qqnorm(residuals(lm_all)) # seem approximately normal
+
+# No need to worry about multicollinearity, as this is a balanced factorial design study
+```
+
+## Directly get means and their standard errors from the model and plot them
+```{r}
+# Add "-1" to directly get the mean estimates
+lm_all_directly_means = lmer(Time ~ Group + (1|PlateGroup) - 1, data = filter(Celegans_low, NaturalDeath == 1), REML = F)
+
+# Model summary
+summary(lm_all_directly_means)
+
+# Compare the mean estimates with Bonferroni correction for multiple testing
+lsmeans(lm_all_directly_means, pairwise ~ Group, adjust = "Bonferroni")
+
+# Extract the estimates of the fixed effects (i.e., the means of the different groups) and their standard errors
+group_means_SEs = coef(summary(lm_all_directly_means))[, 1:2]
+
+# Convert the array into a data frame
+group_means_SEs = as.data.frame(group_means_SEs)
+
+# Assign the row names (i.e., group names) to a new column
+group_means_SEs$Group = row.names(group_means_SEs)
+
+# Remove the "Group" part of the character strings in th Group column
+group_means_SEs$Group = gsub("Group", "", group_means_SEs$Group)
+
+# Convert to tibble (removes row names)
+group_means_SEs = as_tibble(group_means_SEs)
+
+# Reorder the groups
+group_means_SEs = mutate(group_means_SEs, Group = fct_relevel(Group, "Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"))
+
+# Plot the means for each group with the 95% CIs
+ggplot(group_means_SEs, aes(x = Estimate, y = Group, colour = Group)) + 
+    geom_errorbar(aes(xmin = Estimate - qnorm(0.975)*`Std. Error`, 
+                      xmax = Estimate + qnorm(0.975)*`Std. Error`), 
+                  width = 0.5, size = 1) +
+    geom_point(size = 3) +
+    ggtitle("Estimated mean survival by group") +
+    xlab("Estimated mean survival time (days)") +
+    #xlim(1.4, 30) +
+    theme_bw() + 
+    theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5), 
+          axis.text = element_text(size = 10), 
+          axis.title = element_text(size = 12), 
+          axis.title.x = element_text(vjust = -1), 
+          axis.title.y = element_blank(), 
+          legend.title = element_blank()) +
+    scale_x_continuous(expand = c(0, 0), limits = c(5, 35)) +
+    scale_y_discrete(limits = rev(levels(group_means_SEs$Group))) +
+    scale_colour_manual(values = cb_friendly_palette)
+```
+
+## Calculate sample sizes per group for the mean survival time estimation above
+```{r}
+Celegans_low %>% filter(NaturalDeath == 1) %>% group_by(Group) %>% summarise(N = n())
+```
+
+# WITHOUT taking acount of contamination
+
+## All 8 groups
+
+### Compare groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans)
+```
+
+### Compute survival curves
+```{r}
+fit_all = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans)
+print(fit_all)
+```
+
+### Plot survival curves
+```{r}
+(ggsurvplot(fit_all, 
+            #conf.int = TRUE, 
+            legend.labs = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"), 
+            xlab = "Day", 
+            palette = cb_friendly_palette)$plot + 
+   theme_bw())
+```
+
+### Median survival times
+```{r}
+## Tibble with the median lifespan and 95% CIs
+median_all = tibble(Group = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"), 
+                    Median = c(21, 21, 21, 19, 21, 14, 21, 21), 
+                    Lower_bound_95CI = c(21, 21, 21, 18, 21, 11, 19, 19), 
+                    Upper_bound_95CI = c(21, 21, 21, 21, 21, 17, 24, 24))
+
+ggplot(median_all, aes(x = Median, y = Group, colour = Group)) + 
+    geom_errorbar(aes(xmin = Lower_bound_95CI, xmax = Upper_bound_95CI), width = 0.5, size = 1) +
+    geom_point(size = 3) +
+    xlim(1.55, 33) +
+    ggtitle("Median survival by group - all plates") +
+    xlab("Median survival time (days)") +
+    scale_y_discrete(limits = rev(levels(median_95CI_low$Group))) +
+    theme_bw() + 
+    theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5), 
+          axis.text = element_text(size = 10), 
+          axis.title = element_text(size = 12), 
+          axis.title.x = element_text(vjust = -1), 
+          axis.title.y = element_blank(), 
+          legend.title = element_blank()) +
+    scale_x_continuous(expand = c(0, 0), limits = c(5, 35)) +
+    scale_colour_manual(values = cb_friendly_palette)
+```
+
+
+
+
+
+
+
+
+
+
+# NOTHING USED FROM HERE ON OUT
+
+## MET vs non-MET
+
+### Compare MET and non-MET groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ MET, Celegans)
+```
+
+### Compute survival curves for MET and non-MET groups
+```{r}
+fit_MET = survfit(Surv(Time, NaturalDeath) ~ MET, data = Celegans)
+print(fit_MET)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_MET,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## NMN vs non-NMN
+
+### Compare NMN and non-NMN groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ NMN, Celegans)
+```
+
+### Compute survival curves for NMN and non-NMN groups
+```{r}
+fit_NMN = survfit(Surv(Time, NaturalDeath) ~ NMN, data = Celegans)
+print(fit_NMN)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_NMN,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## CR vs non-CR
+
+### Compare CR and non-CR groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ CR, Celegans)
+```
+
+### Compute survival curves for CR and non-CR groups
+```{r}
+fit_CR = survfit(Surv(Time, NaturalDeath) ~ CR, data = Celegans)
+print(fit_CR)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_CR,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## MET vs Control
+
+### Compare groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans, subset = (Group == "Control" | Group == "MET"))
+```
+
+### Compute survival curves
+```{r}
+fit_MET_only = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans, subset = (Group == "Control" | Group == "MET"))
+print(fit_MET_only)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_MET_only,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## NMN vs Control
+
+### Compare groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans, subset = (Group == "Control" | Group == "NMN"))
+```
+
+### Compute survival curves
+```{r}
+fit_NMN_only = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans, subset = (Group == "Control" | Group == "NMN"))
+print(fit_NMN_only)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_NMN_only,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## CR vs Control
+
+### Compare groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans, subset = (Group == "Control" | Group == "CR"))
+```
+
+### Compute survival curves
+```{r}
+fit_CR_only = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans, subset = (Group == "Control" | Group == "CR"))
+print(fit_CR_only)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_CR_only,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## MET + NMN vs Control
+
+### Compare groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans, subset = (Group == "Control" | Group == "MET + NMN"))
+```
+
+### Compute survival curves
+```{r}
+fit_MET_NMN_only = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans, subset = (Group == "Control" | Group == "MET + NMN"))
+print(fit_MET_NMN_only)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_MET_NMN_only,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## MET + CR vs Control
+
+### Compare groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans, subset = (Group == "Control" | Group == "MET + CR"))
+```
+
+### Compute survival curves
+```{r}
+fit_MET_CR_only = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans, subset = (Group == "Control" | Group == "MET + CR"))
+print(fit_MET_CR_only)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_MET_CR_only,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## NMN + CR vs Control
+
+### Compare groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans, subset = (Group == "Control" | Group == "NMN + CR"))
+```
+
+### Compute survival curves
+```{r}
+fit_NMN_CR_only = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans, subset = (Group == "Control" | Group == "NMN + CR"))
+print(fit_NMN_CR_only)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_NMN_CR_only,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## MET + NMN + CR vs Control
+
+### Compare groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Group, Celegans, subset = (Group == "Control" | Group == "MET + NMN + CR"))
+```
+
+### Compute survival curves
+```{r}
+fit_MET_NMN_CR_only = survfit(Surv(Time, NaturalDeath) ~ Group, data = Celegans, subset = (Group == "Control" | Group == "MET + NMN + CR"))
+print(fit_MET_NMN_CR_only)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_MET_NMN_CR_only,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
+
+
+## Single vs Combination interventions
+
+### Compare groups
+```{r}
+survdiff(Surv(Time, NaturalDeath) ~ Ind_vs_Comb, Celegans, subset = (Ind_vs_Comb != "Control"))
+```
+
+### Compute survival curves
+```{r}
+fit_ind_vs_comb = survfit(Surv(Time, NaturalDeath) ~ Ind_vs_Comb, data = Celegans, subset = (Ind_vs_Comb != "Control"))
+print(fit_ind_vs_comb)
+```
+
+### Plot survival curves
+```{r}
+ggsurvplot(fit_ind_vs_comb,
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE,
+           risk.table.col = "strata",
+           linetype = "strata",
+           surv.median.line = "hv",
+           ggtheme = theme_bw(),
+           palette = c("#E7B800", "#2E9FDF"))
+```
+
