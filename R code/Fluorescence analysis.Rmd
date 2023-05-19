@@ -1,0 +1,875 @@
+---
+title: "Fluorescence Analysis"
+date: "2023-04-15"
+output: html_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load necessary packages
+```{r}
+library(afex) # for coefficient p-values to be shown in the mixed model summary
+library(dplyr) # for various useful data manipulation functions
+library(emmeans) # for comparing slopes between groups over time in a linear model
+library(lme4) # for mixed modelling
+library(RColorBrewer) # for colourblind-friendly palettes
+library(reshape) # for reshaping data
+library(stringr) # for str_replace_all() function
+library(tidyverse) # for a plethora of packages that have the same "design philosophy, grammar, and data structures" for work with tidy data
+```
+
+# Read in the csv files with the fluorescence quantification data
+```{r}
+# GFP filterset data
+GFP = read_csv("D:/Oxford/4th-year Project/Results/Images/Fluorescence/Results - GFP.csv")
+
+# mCherry filterset data
+mCherry = read_csv("D:/Oxford/4th-year Project/Results/Images/Fluorescence/Results - mCherry.csv")
+```
+
+# Create columns for day, group, plate, and whether the ROI is background or not
+```{r}
+# For GFP
+for(i in 1:length(GFP$Label)){
+  GFP$Day[i] = case_when(
+    grepl("D6", GFP$Label[i]) ~ 6,
+    grepl("D10", GFP$Label[i]) ~ 10,
+    grepl("D13", GFP$Label[i]) ~ 13,
+    grepl("D17", GFP$Label[i]) ~ 17,
+    grepl("D25", GFP$Label[i]) ~ 25,
+    grepl("D27", GFP$Label[i]) ~ 27,
+    grepl("D29", GFP$Label[i]) ~ 29,
+    grepl("D31", GFP$Label[i]) ~ 31,
+    grepl("D33", GFP$Label[i]) ~ 33,
+    grepl("D35", GFP$Label[i]) ~ 35,
+    grepl("D37", GFP$Label[i]) ~ 37
+    )
+  GFP$Group[i] = case_when(
+    grepl("Con", GFP$Label[i]) ~ "Control",
+    grepl("_CR_", GFP$Label[i]) ~ "CR",
+    grepl("_MET_", GFP$Label[i]) ~ "MET",
+    grepl("_NMN_", GFP$Label[i]) ~ "NMN",
+    grepl("MET\\+NMN_", GFP$Label[i]) ~ "MET + NMN",
+    grepl("_MET\\+CR", GFP$Label[i]) ~ "MET + CR",
+    grepl("_NMN\\+CR", GFP$Label[i]) ~ "NMN + CR",
+    grepl("MET\\+NMN\\+CR", GFP$Label[i]) ~ "MET + NMN + CR"
+    )
+  GFP$Plate[i] = case_when(
+    grepl("P1", GFP$Label[i]) ~ 1,
+    grepl("P2", GFP$Label[i]) ~ 2,
+    grepl("P3", GFP$Label[i]) ~ 3,
+    grepl("P4", GFP$Label[i]) ~ 4,
+    grepl("P5", GFP$Label[i]) ~ 5
+    )
+  GFP$Background[i] = case_when(
+    grepl("Background", GFP$Label[i]) ~ TRUE,
+    TRUE ~ FALSE
+    )
+}
+
+# For mCherry
+for(i in 1:length(mCherry$Label)){
+  mCherry$Day[i] = case_when(
+    grepl("D6", mCherry$Label[i]) ~ 6,
+    grepl("D10", mCherry$Label[i]) ~ 10,
+    grepl("D13", mCherry$Label[i]) ~ 13,
+    grepl("D17", mCherry$Label[i]) ~ 17,
+    grepl("D25", mCherry$Label[i]) ~ 25,
+    grepl("D27", mCherry$Label[i]) ~ 27,
+    grepl("D29", mCherry$Label[i]) ~ 29,
+    grepl("D31", mCherry$Label[i]) ~ 31,
+    grepl("D33", mCherry$Label[i]) ~ 33,
+    grepl("D35", mCherry$Label[i]) ~ 35,
+    grepl("D37", mCherry$Label[i]) ~ 37
+    )
+  mCherry$Group[i] = case_when(
+    grepl("Con", mCherry$Label[i]) ~ "Control",
+    grepl("_CR_", mCherry$Label[i]) ~ "CR",
+    grepl("_MET_", mCherry$Label[i]) ~ "MET",
+    grepl("_NMN_", mCherry$Label[i]) ~ "NMN",
+    grepl("MET\\+NMN_", mCherry$Label[i]) ~ "MET + NMN",
+    grepl("_MET\\+CR", mCherry$Label[i]) ~ "MET + CR",
+    grepl("_NMN\\+CR", mCherry$Label[i]) ~ "NMN + CR",
+    grepl("MET\\+NMN\\+CR", mCherry$Label[i]) ~ "MET + NMN + CR"
+    )
+  mCherry$Plate[i] = case_when(
+    grepl("P1", mCherry$Label[i]) ~ 1,
+    grepl("P2", mCherry$Label[i]) ~ 2,
+    grepl("P3", mCherry$Label[i]) ~ 3,
+    grepl("P4", mCherry$Label[i]) ~ 4,
+    grepl("P5", mCherry$Label[i]) ~ 5
+    )
+  mCherry$Background[i] = case_when(
+    grepl("Background", mCherry$Label[i]) ~ TRUE,
+    TRUE ~ FALSE
+    )
+}
+```
+
+# Subtracting the background fluorescence values from the worm ROIs
+```{r}
+# Create copies of the tibbles
+GFP_subtracted = GFP
+mCherry_subtracted = mCherry
+
+# Create an empty vector that will hold the row numbers for all the ROIs from which a specific background value has to be subtracted
+br = c()
+
+# Create a "for" loop that goes through each GFP ROI
+for(i in 1:length(GFP_subtracted$Label)){
+  if(GFP_subtracted$Background[i] == FALSE){
+    br = c(br, i) # if it is not a background ROI, add the row number of the ROI to the vector
+  }
+  else{
+    for(j in 1:length(br)){
+      GFP_subtracted$Mean[br[j]] = GFP_subtracted$Mean[br[j]] - GFP_subtracted$Mean[i] # if it is a background ROI, subtract its value from all the ROIs with row numbers stored in the vector
+    }
+    br = c() # reset the vector to empty, so that it can be used to store the row numbers of the next batch of ROIs to be subtracted from the next background ROI
+  }
+}
+
+# Do the same for the mCherry data set
+for(i in 1:length(mCherry_subtracted$Label)){
+  if(mCherry_subtracted$Background[i] == FALSE){
+    br = c(br, i)
+  }
+  else{
+    for(j in 1:length(br)){
+      mCherry_subtracted$Mean[br[j]] = mCherry_subtracted$Mean[br[j]] - mCherry_subtracted$Mean[i]
+    }
+    br = c()
+  }
+}
+```
+
+# Create two new columns - one containing the Label info (without the specific ROI info) and one containing the specific ROI info
+```{r}
+GFP_subtracted = separate_wider_delim(data = GFP_subtracted, cols = "Label", delim = ".", names = c("Plate_ID", "ROI"), cols_remove = FALSE)
+
+mCherry_subtracted = separate_wider_delim(data = mCherry_subtracted, cols = "Label", delim = ".", names = c("Plate_ID", "ROI"), cols_remove = FALSE)
+```
+
+# Check whether the difference between worm ROI and background ROI fluorescence is greater for plates with higher background fluorescence.
+```{r}
+GFP_diff_worm = GFP_subtracted %>% filter(Background == FALSE) %>% group_by(Plate_ID) %>% summarise(Mean_worm_fluo = mean(Mean))
+ 
+GFP_diff_back = GFP_subtracted %>% filter(Background == TRUE) %>% group_by(Plate_ID) %>% summarise(Mean_back_fluo = mean(Mean))
+
+GFP_diff = merge(GFP_diff_worm, GFP_diff_back, by = "Plate_ID")
+
+ggplot(GFP_diff, aes(x = Mean_worm_fluo, y = Mean_back_fluo)) +
+  geom_point()
+
+# Conclusion: It does seem that the difference between the worm ROI fluorescence and the background ROI fluorescence is greater for plates with higher background fluorescence.
+```
+
+# Remove background ROIs
+```{r}
+GFP_subtracted = filter(GFP_subtracted, Background == FALSE)
+mCherry_subtracted = filter(mCherry_subtracted, Background == FALSE)
+```
+
+# Add contamination data
+```{r}
+# Load lifespan data
+lifespan = read_csv("D:/Oxford/4th-year Project/Results/Lifespan data - R.csv")
+
+# Replace "_" with "+" in the lifespan data so that the group names match those in the fluorescence data
+lifespan = lifespan %>% mutate(Group = str_replace_all(Group, "_", " + "))
+
+# Add columns from lifespan data to movement data when matching by group and plate
+GFP_subtracted = inner_join(GFP_subtracted, lifespan, by = c("Group", "Plate"), multiple = "first")
+mCherry_subtracted = inner_join(mCherry_subtracted, lifespan, by = c("Group", "Plate"), multiple = "first")
+```
+
+# Clean and format the merged data
+```{r}
+# Remove unnecessary columns
+GFP_subtracted = subset(GFP_subtracted, select = -c(GroupNum, Worm, PlateGroup, Time, Censoring, NaturalDeath))
+mCherry_subtracted = subset(mCherry_subtracted, select = -c(GroupNum, Worm, PlateGroup, Time, Censoring, NaturalDeath))
+
+# Make the "Group" and "Plate" variables factors
+GFP_subtracted$Group = as.factor(GFP_subtracted$Group)
+GFP_subtracted$Plate = as.factor(GFP_subtracted$Plate)
+mCherry_subtracted$Group = as.factor(mCherry_subtracted$Group)
+mCherry_subtracted$Plate = as.factor(mCherry_subtracted$Plate)
+
+# Create a new column that concatenates the group and plate variables
+GFP_subtracted$GroupPlate = paste(GFP_subtracted[["Group"]], GFP_subtracted[["Plate"]], sep = "_", collapse = NULL)
+mCherry_subtracted$GroupPlate = paste(mCherry_subtracted[["Group"]], mCherry_subtracted[["Plate"]], sep = "_", collapse = NULL)
+
+# Reorder the groups in a more logical way
+GFP_subtracted = mutate(GFP_subtracted, Group = fct_relevel(Group, "Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"))
+mCherry_subtracted = mutate(mCherry_subtracted, Group = fct_relevel(Group, "Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR"))
+
+# When plotting the data points for the mCherry data set for the first time, it was obvious that there were some outliers. After visually inspecting the relevant mCherry images, I noticed that mCherry_D6_NMN_P2 and mCherry_D6_Con_P2 stood out as being particularly bright compared to all other images. Upon checking the relevant files for the microscope settings used when capturing those images, I noticed that the "ET GFP" filterset had been used rather than the "ET mCherry" filterset. I then wrote a script to automatically check which images might have been taken with the wrong microscope filterset. None of the GFP images were taken with the wrong microscope settings, but it turned out that three mCherry images ("mCherry_D6_Con_P2", "mCherry_D6_CR_P4_1", and "mCherry_D6_NMN_P2") had been taken with the wrong filterset ("ET GFP"), and so should be excluded from the analysis. This is why the below step was included in the data cleaning.
+
+# Exclude the data points from the mCherry data set that have been identified as erroneous
+mCherry_subtracted = filter(mCherry_subtracted, !Plate_ID %in% c("mCherry_D6_Con_P2", "mCherry_D6_CR_P4_1", "mCherry_D6_NMN_P2"))
+
+# Exclude all observations from the GFP dataset that have a negative fluorescence value (there are only 15 observations with negative fluorescence values). These negative values are a result of the background having a larger mean fluorescence value than the worm ROI due to suboptimal background selection. The 15 observations with negative values do not make biological sense (the transparent worms cannot have less fluorescence than the background), and would prevent the fluorescence value from being square root-transformed later on in the analysis.
+GFP_subtracted = filter(GFP_subtracted, Mean >= 0)
+```
+
+# Calculate sample sizes per group for the cleaned data
+```{r}
+mCherry_subtracted %>% group_by(Group) %>% summarise(N = n())
+
+GFP_subtracted %>% group_by(Group) %>% summarise(N = n())
+```
+
+# LOW CONTAMINATION PLATES ONLY FROM NOW ON
+
+# Subset the LOW contamination plates
+```{r}
+GFP_low = filter(GFP_subtracted, Contam_Level_Binary == "Low")
+mCherry_low = filter(mCherry_subtracted, Contam_Level_Binary == "Low")
+```
+
+# Plot the changes in fluorescence intensity over time for the different groups
+
+## Create a colour blind friendly palette
+```{r}
+# Have a look at the available colour blind friendly palettes
+display.brewer.all(colorblindFriendly = TRUE)
+
+# See the HEX codes for the chosen colour blind-friendly palette
+brewer.pal(12, "Paired")
+
+# Specify the colours for each group - Dark2 palette
+cb_friendly_palette = c("Control" = "#FF7F00", "MET" = "#B2DF8A", "NMN" = "#A6CEE3", "CR" = "#FB9A99", "MET + NMN" = "#33A02C", "MET + CR" = "#E31A1C", "NMN + CR" = "#1F78B4", "MET + NMN + CR" = "#000000")
+```
+
+## Not log-transformed fluorescence variables
+
+### Calculate the mean fluorescence intensity and its associated error for the worms in each group at each time point
+```{r}
+GFP_summary = GFP_low %>% group_by(Group, Day) %>% summarise(Mean_fluo = mean(Mean), Error = qnorm(0.975)*sd(Mean)/sqrt(n()))
+
+mCherry_summary = mCherry_low %>% group_by(Group, Day) %>% summarise(Mean_fluo = mean(Mean), Error = qnorm(0.975)*sd(Mean)/sqrt(n()))
+
+# Testing that it actually worked
+# 1.959964*sd(filter(GFP_low, Group == "CR", Day == "10")$Mean)/sqrt(length(filter(GFP_low, Group == "CR", Day == "10")$Mean))
+```
+
+### Change in group means over time
+
+#### All groups on same plot
+
+##### GFP
+```{r}
+# With error bars
+ggplot(GFP_summary, aes(x = Day, y = Mean_fluo, colour = Group, ymin = Mean_fluo - Error, ymax = Mean_fluo + Error)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  geom_errorbar(width = 0.2) +
+  scale_colour_manual(values = cb_friendly_palette)
+
+# Without error bars
+ggplot(GFP_summary, aes(x = Day, y = Mean_fluo, colour = Group)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+##### mCherry
+```{r}
+# With error bars
+ggplot(mCherry_summary, aes(x = Day, y = Mean_fluo, colour = Group, ymin = Mean_fluo - Error, ymax = Mean_fluo + Error)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  geom_errorbar(width = 0.2) +
+  scale_colour_manual(values = cb_friendly_palette)
+
+# Without error bars
+ggplot(mCherry_summary, aes(x = Day, y = Mean_fluo, colour = Group)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+#### Each group in separate facet
+
+##### GFP
+```{r}
+ggplot(GFP_summary, aes(x = Day, y = Mean_fluo, colour = Group, ymin = Mean_fluo - Error, ymax = Mean_fluo + Error)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  geom_errorbar(width = 0.2) +
+  facet_wrap(~Group) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+##### mCherry
+```{r}
+ggplot(mCherry_summary, aes(x = Day, y = Mean_fluo, colour = Group, ymin = Mean_fluo - Error, ymax = Mean_fluo + Error)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  geom_errorbar(width = 0.2) +
+  facet_wrap(~Group) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+### All data points
+
+#### GFP
+```{r}
+ggplot(GFP_low, aes(x = Day, y = Mean, colour = Group)) +
+  geom_point() +
+  facet_wrap(~Group) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+#### mCherry
+```{r}
+ggplot(mCherry_low, aes(x = Day, y = Mean, colour = Group)) +
+  geom_point() +
+  facet_wrap(~Group) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+## Log-transformed fluorescence variables
+
+### Calculate the mean logged fluorescence intensity and its associated error for the worms in each group at each time point
+```{r}
+GFP_summary_logged = GFP_low %>% group_by(Group, Day) %>% 
+  summarise(Mean_log_fluo = mean(log(Mean)), Error_log_fluo = qnorm(0.975)*sd(log(Mean))/sqrt(n()))
+
+mCherry_summary_logged = mCherry_low %>% group_by(Group, Day) %>% 
+  summarise(Mean_log_fluo = mean(log(Mean)), Error_log_fluo = qnorm(0.975)*sd(log(Mean))/sqrt(n()))
+```
+
+### Change in group means over time
+
+#### All groups on same plot
+
+##### GFP
+```{r}
+# With error bars
+ggplot(GFP_summary_logged, aes(x = Day, y = Mean_log_fluo, colour = Group, ymin = Mean_log_fluo - Error_log_fluo, ymax = Mean_log_fluo + Error_log_fluo)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  geom_errorbar(width = 0.2) +
+  scale_colour_manual(values = cb_friendly_palette)
+
+# Without error bars
+ggplot(GFP_summary_logged, aes(x = Day, y = Mean_log_fluo, colour = Group)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+##### mCherry
+```{r}
+# With error bars
+ggplot(mCherry_summary_logged, aes(x = Day, y = Mean_log_fluo, colour = Group, ymin = Mean_log_fluo - Error_log_fluo, ymax = Mean_log_fluo + Error_log_fluo)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  geom_errorbar(width = 0.2) +
+  scale_colour_manual(values = cb_friendly_palette)
+
+# Without error bars
+ggplot(mCherry_summary_logged, aes(x = Day, y = Mean_log_fluo, colour = Group)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+#### Each group in separate facet
+
+##### GFP
+```{r}
+ggplot(GFP_summary_logged, aes(x = Day, y = Mean_log_fluo, colour = Group, ymin = Mean_log_fluo - Error_log_fluo, ymax = Mean_log_fluo + Error_log_fluo)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  geom_errorbar(width = 0.2) +
+  facet_wrap(~Group) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+##### mCherry
+```{r}
+ggplot(mCherry_summary_logged, aes(x = Day, y = Mean_log_fluo, colour = Group, ymin = Mean_log_fluo - Error_log_fluo, ymax = Mean_log_fluo + Error_log_fluo)) +
+  geom_point() +
+  geom_line(aes(group = Group)) +
+  geom_errorbar(width = 0.2) +
+  facet_wrap(~Group) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+### All data points
+
+#### GFP
+```{r}
+ggplot(GFP_low, aes(x = Day, y = log(Mean), colour = Group)) +
+  geom_point() +
+  facet_wrap(~Group) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+#### mCherry
+```{r}
+ggplot(mCherry_low, aes(x = Day, y = log(Mean), colour = Group)) +
+  geom_point() +
+  facet_wrap(~Group) +
+  scale_colour_manual(values = cb_friendly_palette)
+```
+
+# MODELLING
+
+## Check for normality of the response variables
+```{r}
+hist(GFP_low$Mean) # not normal - skewed
+
+hist(mCherry_low$Mean) # not normal - skewed
+
+hist(log(GFP_low$Mean)) # not normal - skewed
+
+hist(log(mCherry_low$Mean)) # not normal - skewed
+
+hist(sqrt(GFP_low$Mean)) # approximately normal
+
+hist(sqrt(mCherry_low$Mean)) # approximately normal
+
+# CONCLUSION: Based on the above histograms, the square-root transformation of the mean fluorescence seems to yield distributions that are the closest to normal
+```
+
+## GFP
+
+### Model construction
+```{r}
+# Linear model with:
+# - response variable: mean fluorescence
+# - fixed effects: group, day, all group*day interactions, day^2, and all group*(day^2) interactions
+# - random effect: plate
+summary(lmer(Mean ~ Group + Day + Group*Day + I(Day^2) + Group*I(Day^2) + (1|GroupPlate), data = GFP_low, REML = F))
+
+# Linear model with:
+# - response variable: mean fluorescence
+# - fixed effects: group, log(day), and all group*log(day) interactions
+# - random effect: plate
+summary(lmer(Mean ~ Group + log(Day) + Group*log(Day) + (1|GroupPlate), data = GFP_low, REML = F))
+
+# When comparing the above two models, we can see that the Bayesian Information Criterion (BIC) is smaller for the model with log-transformed time (BIC = 2175.9) rather than the model with quadratic effects of time (BIC = 2210.7). Therefore, the model with log-transformed time is better.
+
+# Linear model with:
+# - response variable: sqrt-transformed mean fluorescence
+# - fixed effects: group, day, all group*day interactions, day^2, and all group*(day^2) interactions
+# - random effect: plate
+summary(lmer(sqrt(Mean) ~ Group + Day + Group*Day + I(Day^2) + Group*I(Day^2) + (1|GroupPlate), data = GFP_low, REML = F))
+
+# Linear model with:
+# - response variable: sqrt-transformed mean fluorescence
+# - fixed effects: group, log(day), and all group*log(day) interactions
+# - random effect: plate
+summary(lmer(sqrt(Mean) ~ Group + log(Day) + Group*log(Day) + (1|GroupPlate), data = GFP_low, REML = F))
+
+# When comparing the above two models with sqrt-transformed mean fluorescence, we can see that the BIC is smaller for the model with log-transformed time (BIC = 916.7) rather than the model with quadratic effects of time (BIC = 950.8). Therefore, the model with log-transformed time is better.
+
+# Since plate doesn't explain any of the variance in either of the models, remove it from the models
+
+# Model with mean fluorescence
+lm_GFP_mean_fluo_not_sqrt = lm(Mean ~ Group + log(Day) + Group*log(Day), data = GFP_low)
+summary(lm_GFP_mean_fluo_not_sqrt)
+
+# Model with sqrt-transformed mean fluorescence
+lm_GFP_mean_fluo_sqrt = lm(sqrt(Mean) ~ Group + log(Day) + Group*log(Day), data = GFP_low)
+summary(lm_GFP_mean_fluo_sqrt)
+
+# Keep all remaining terms in the models, as their estimates are significantly different from 0
+
+# Check the residuals for the model where mean fluorescence is not sqrt-transformed
+res_lm_GFP_mean_fluo_not_sqrt = resid(lm_GFP_mean_fluo_not_sqrt)
+hist(res_lm_GFP_mean_fluo_not_sqrt) # histogram of the residuals
+plot(lm_GFP_mean_fluo_not_sqrt) # diagnostic plots
+
+# Check the residuals for the model where mean fluorescence is sqrt-transformed
+res_lm_GFP_mean_fluo_sqrt = resid(lm_GFP_mean_fluo_sqrt)
+hist(res_lm_GFP_mean_fluo_sqrt) # histogram of the residuals
+plot(lm_GFP_mean_fluo_sqrt) # diagnostic plots
+
+# Based on the above analysis of the residuals, the model using the sqrt-transformed mean fluorescence (i.e., lm_mean_fluo_sqrt) is better, and will be used for the rest of the analysis
+summary(lm_GFP_mean_fluo_sqrt)
+```
+
+### Check whether the effects of intervention combinations are additive, antagonistic, or synergistic
+```{r}
+# List all fixed effects separately so that the model summary contains information on whether the interactive effects (i.e., the slopes of the combination groups) differ from additive
+factorial_lm_GFP_mean_fluo_sqrt = lm(sqrt(Mean) ~ MET + NMN + CR + MET*NMN + MET*CR + NMN*CR + MET*NMN*CR + log(Day) + MET*log(Day) + NMN*log(Day) + CR*log(Day) + MET*NMN*log(Day) + MET*CR*log(Day) + NMN*CR*log(Day) + MET*NMN*CR*log(Day), data = GFP_low)
+
+# View the model summary
+summary(factorial_lm_GFP_mean_fluo_sqrt)
+
+# CONCLUSIONS: From the model summary, it seems that:
+# - the interaction between MET and NMN is significantly different from 0. Specifically, it seems to be synergistic. In other words the slope is lower than would be expected if the interaction was additive, indicating a reduced rate of fluorescence increase.
+# - the interaction between MET and CR is not significantly different from 0, suggesting additive effects of MET and NMN.
+# - the interaction between NMN and CR is significantly different from 0. Specifically, it seems to be synergistic. In other words the slope is lower than would be expected if the interaction was additive, indicating a reduced rate of fluorescence increase.
+# - the interaction between MET, NMN, and CR is significantly different from 0. Specifically, it seems to be antagonistic. In other words the slope is higher than would be expected if the interaction was additive, indicating an increased rate of fluorescence increase.
+```
+
+### Extract the slope coefficients for each group, as well as the estimates of the differences in slopes for all pairwise groups comparisons
+```{r}
+# No correction for multiple comparisons
+lstrends(lm_GFP_mean_fluo_sqrt, pairwise ~ Group, var = "log(Day)", adjust = "NO")
+
+# CONCLUSIONS: Significantly different slopes:
+# - Control and:
+#   - NMN
+#   - CR
+#   - NMN + CR
+#   - MET + NMN + CR
+# - MET and:
+#   - NMN
+#   - CR
+# - NMN and:
+#   - MET + NMN
+# - CR and:
+#   - MET + NMN
+# - MET + NMN and:
+#   - MET + NMN + CR
+
+# Bonferroni correction for multiple comparisons
+GFP_mean_fluo_slope_diff_adj_pval = lstrends(lm_GFP_mean_fluo_sqrt, pairwise ~ Group, var = "log(Day)", adjust = "Bonferroni")
+GFP_mean_fluo_slope_diff_adj_pval
+
+# CONCLUSIONS: Significantly different slopes:
+# - Control and:
+#   - NMN
+#   - CR
+```
+
+### Plot - all data points with generated predictions
+```{r}
+# Create a data frame that contains all possible Day-Group combinations. Each combination will be used as a set of predictors when making a single prediction about GFP fluorescence based on the model.
+GFP_fluo_predictors = expand.grid(Day = seq(4, 38, length.out = 35), Group = as.factor(levels(GFP_low$Group)))
+
+# Generate a data frame with the predictions (and associated SEs) based on the predictors and the model
+GFP_fluo_predictions = as.data.frame(predict(lm_GFP_mean_fluo_sqrt, newdata = GFP_fluo_predictors, type = "response", se.fit = TRUE))
+
+# Combine the two data frames
+GFP_fluo_predictions = cbind(GFP_fluo_predictors, GFP_fluo_predictions)
+
+# Reorder the group levels
+GFP_fluo_predictions$Group = fct_relevel(GFP_fluo_predictions$Group, "Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR")
+
+# Plot the predictions with their 95% CIs over the actual data points
+ggplot() +
+  geom_ribbon(data = GFP_fluo_predictions, aes(x = Day, ymin = (fit - 1.96*se.fit)^2, ymax = (fit + 1.96*se.fit)^2, colour = Group, fill = Group), outline.type = "full", alpha = 0.2, show.legend = FALSE) +
+  geom_point(data = GFP_low, aes(x = Day, y = Mean, colour = Group)) +
+  geom_line(data = GFP_fluo_predictions, aes(x = Day, y = fit^2, colour = Group), size = 0.75) +
+  ggtitle("Green autofluorescence values and model predictions by group") +
+  xlab("Day of adulthood") +
+  ylab("Green autofluorescence (pixel intensity)") +
+  facet_wrap(~Group) +
+  scale_x_continuous(expand = c(0, 0), limits = c(-2, 42)) +
+  scale_colour_manual(values = cb_friendly_palette) + 
+  scale_fill_manual(values = cb_friendly_palette) + 
+  theme_bw() +
+  theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5), 
+        axis.text = element_text(size = 10), 
+        axis.title = element_text(size = 12), 
+        axis.title.x = element_text(vjust = -1), 
+        axis.title.y = element_text(vjust = 3), 
+        legend.title = element_blank())
+```
+
+##### Construct and plot a matrix with the p-values for all pairwise group comparisons of slopes
+```{r}
+# Extract exact p-values
+summary(GFP_mean_fluo_slope_diff_adj_pval$contrasts)$p.value
+
+p_val_GFP_mean_fluo_slope_diff = matrix(
+  # Sequence of p-values
+  c(NA, 1, 0.01629952, 0.01879751, 1, 1, 0.95143950, 0.36002187, 
+    NA, NA, 0.82096877, 0.85538002, 1, 1, 1, 1, 
+    NA, NA, NA, 1, 0.08621897, 1, 1, 1, 
+    NA, NA, NA, NA, 0.09370428, 1, 1, 1, 
+    NA, NA, NA, NA, NA, 1, 1, 1, 
+    NA, NA, NA, NA, NA, NA, 1, 1, 
+    NA, NA, NA, NA, NA, NA, NA, 1, 
+    NA, NA, NA, NA, NA, NA, NA, NA),
+  nrow = 8, # Number of rows
+  ncol = 8 # Number of columns   
+)
+
+# Name the rows
+rownames(p_val_GFP_mean_fluo_slope_diff) = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR")
+
+# Name the columns
+colnames(p_val_GFP_mean_fluo_slope_diff) = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR")
+
+# Print out the 8x8 matrix
+cat("The 8x8 matrix:\n")
+print(p_val_GFP_mean_fluo_slope_diff)
+
+# Create a colour blind-friendly palette for the plot
+cb_friendly_p_val = c("(0, 0.0001]" = "#08306B", 
+                      "(0.0001, 0.001]" = "#08519C", 
+                      "(0.001, 0.01]" = "#2171B5", 
+                      "(0.01, 0.05]" = "#4292C6", 
+                      "(0.05, 1]" = "#A50026", 
+                      " " = "white")
+
+# Transform the matrix into a data frame
+p_val_GFP_fluo_melt = melt.matrix(p_val_GFP_mean_fluo_slope_diff)
+
+# Convert the group names into factors
+p_val_GFP_fluo_melt$X1 = as.factor(p_val_GFP_fluo_melt$X1)
+p_val_GFP_fluo_melt$X2 = as.factor(p_val_GFP_fluo_melt$X2)
+
+# Create a new column that categorises the p-values
+p_val_GFP_fluo_melt$value_cat = cut(p_val_GFP_fluo_melt$value, 
+                                    breaks = c(0, 0.0001, 0.001, 0.01, 0.05, 1), 
+                                    right = TRUE)
+
+# Add a space between the numbers denoting the interval categories
+p_val_GFP_fluo_melt$value_cat = str_replace_all(p_val_GFP_fluo_melt$value_cat, ",", ", ")
+
+# Assign all the comparisons for which a p-value of 0 was provided (and hence had NAs assigned to them in the new column) the level " " in the new column
+p_val_GFP_fluo_melt[is.na(p_val_GFP_fluo_melt$value_cat), ]$value_cat = " "
+
+# Convert back to factor (as the above manipulations changed it to character) and re-specify the factor levels
+p_val_GFP_fluo_melt$value_cat = factor(p_val_GFP_fluo_melt$value_cat, 
+                                       levels = c("(0, 0.0001]", 
+                                                  "(0.0001, 0.001]", 
+                                                  "(0.001, 0.01]", 
+                                                  "(0.01, 0.05]", 
+                                                  "(0.05, 1]", 
+                                                  " "))
+
+# Convert the precise p-values into scientific format with one decimal place
+p_val_GFP_fluo_melt$value = format(p_val_GFP_fluo_melt$value, format = "e", digits = 2)
+
+# Plot the p-values
+ggplot(p_val_GFP_fluo_melt, aes(X1, X2)) +
+  geom_tile(aes(fill = value_cat), color = "white", size = 0.5) +
+  geom_text(aes(label = value), size = 3, colour = "white") +
+  scale_fill_manual(values = cb_friendly_p_val, drop = FALSE) +
+  labs(fill = "p-value") +
+  ggtitle("P-values for comparisons\nbetween rates of change in green autofluorescence") +
+  theme(axis.line = element_blank(), 
+        axis.text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), 
+        axis.ticks = element_blank(), 
+        axis.title = element_blank(), 
+        legend.key = element_rect(fill = "white"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        plot.title = element_text(face = "bold", hjust = 0.5, size = 14))
+```
+
+## mCherry
+
+### Model construction
+```{r}
+# Linear model with:
+# - response variable: mean fluorescence
+# - fixed effects: group, day, all group*day interactions, day^2, and all group*(day^2) interactions
+# - random effect: plate
+summary(lmer(Mean ~ Group + Day + Group*Day + I(Day^2) + Group*I(Day^2) + (1|GroupPlate), data = mCherry_low, REML = F))
+
+# Linear model with:
+# - response variable: mean fluorescence
+# - fixed effects: group, log(day), and all group*log(day) interactions
+# - random effect: plate
+summary(lmer(Mean ~ Group + log(Day) + Group*log(Day) + (1|GroupPlate), data = mCherry_low, REML = F))
+
+# When comparing the above two models, we can see that the BIC is smaller for the model with log-transformed time (BIC = 859) rather than the model with quadratic effects of time (BIC = 874.6). Therefore, the model with log-transformed time is better.
+
+# Linear model with:
+# - response variable: sqrt-transformed mean fluorescence
+# - fixed effects: group, day, all group*day interactions, day^2, and all group*(day^2) interactions
+# - random effect: plate
+summary(lmer(sqrt(Mean) ~ Group + Day + Group*Day + I(Day^2) + Group*I(Day^2) + (1|GroupPlate), data = mCherry_low, REML = F))
+
+# Linear model with:
+# - response variable: sqrt-transformed mean fluorescence
+# - fixed effects: group, log(day), and all group*log(day) interactions
+# - random effect: plate
+summary(lmer(sqrt(Mean) ~ Group + log(Day) + Group*log(Day) + (1|GroupPlate), data = mCherry_low, REML = F))
+
+# When comparing the above two models with sqrt-transformed mean fluorescence, we can see that the BIC is smaller for the model with log-transformed time (BIC = 134.5) rather than the model with quadratic effects of time (BIC = 163.1). Therefore, the model with log-transformed time is better.
+
+# Since plate doesn't explain any of the variance in either of the models, remove it from the models
+
+# Model with mean fluorescence
+lm_mCherry_mean_fluo_not_sqrt = lm(Mean ~ Group + log(Day) + Group*log(Day), data = mCherry_low)
+summary(lm_mCherry_mean_fluo_not_sqrt)
+
+# Model with sqrt-transformed mean fluorescence
+lm_mCherry_mean_fluo_sqrt = lm(sqrt(Mean) ~ Group + log(Day) + Group*log(Day), data = mCherry_low)
+summary(lm_mCherry_mean_fluo_sqrt)
+
+# Keep all remaining terms in the models, as their estimates are significantly different from 0
+
+# Check the residuals for the model where mean fluorescence is not sqrt-transformed
+res_lm_mCherry_mean_fluo_not_sqrt = resid(lm_mCherry_mean_fluo_not_sqrt)
+hist(res_lm_mCherry_mean_fluo_not_sqrt) # histogram of the residuals
+plot(lm_mCherry_mean_fluo_not_sqrt) # diagnostic plots
+
+# Check the residuals for the model where mean fluorescence is sqrt-transformed
+res_lm_mCherry_mean_fluo_sqrt = resid(lm_mCherry_mean_fluo_sqrt)
+hist(res_lm_mCherry_mean_fluo_sqrt) # histogram of the residuals
+plot(lm_mCherry_mean_fluo_sqrt) # diagnostic plots
+
+# Based on the above analysis of the residuals, the model using the sqrt-transformed mean fluorescence (i.e., lm_mean_fluo_sqrt) is better, and will be used for the rest of the analysis
+summary(lm_mCherry_mean_fluo_sqrt)
+```
+
+### Check whether the effects of intervention combinations are additive, antagonistic, or synergistic
+```{r}
+# List all fixed effects separately so that the model summary contains information on whether the interactive effects (i.e., the slopes of the combination groups) differ from additive
+factorial_lm_mCherry_mean_fluo_sqrt = lm(sqrt(Mean) ~ MET + NMN + CR + MET*NMN + MET*CR + NMN*CR + MET*NMN*CR + log(Day) + MET*log(Day) + NMN*log(Day) + CR*log(Day) + MET*NMN*log(Day) + MET*CR*log(Day) + NMN*CR*log(Day) + MET*NMN*CR*log(Day), data = mCherry_low)
+
+# View the model summary
+summary(factorial_lm_mCherry_mean_fluo_sqrt)
+
+# CONCLUSIONS: From the model summary, it seems that:
+# - the interaction between NMN and CR is significantly different from 0 (but very close to the alpha level of 0.05). Specifically, it seems to be synergistic. In other words the slope is lower than would be expected if the interaction was additive, indicating a reduced rate of fluorescence increase.
+# - all other interactive effects are not significantly different from 0, suggesting additive effects.
+```
+
+### Extract the slope coefficients for each group, as well as the estimates of the differences in slopes for all pairwise groups comparisons
+```{r}
+# No correction for multiple comparisons
+lstrends(lm_mCherry_mean_fluo_sqrt, pairwise ~ Group, var = "log(Day)", adjust = "NO")
+
+# CONCLUSIONS: Significantly different slopes:
+# - Control and:
+#   - NMN
+#   - CR
+#   - NMN + CR
+#   - MET + NMN + CR
+# - MET and:
+#   - CR
+#   - NMN + CR
+#   - MET + NMN + CR
+# - CR and:
+#   - MET + NMN
+
+# Bonferroni correction for multiple comparisons
+mCherry_mean_fluo_slope_diff_adj_pval = lstrends(lm_mCherry_mean_fluo_sqrt, pairwise ~ Group, var = "log(Day)", adjust = "Bonferroni")
+mCherry_mean_fluo_slope_diff_adj_pval
+
+lsmeans(lm_mCherry_mean_fluo_sqrt, pairwise ~ Group, var = "log(Day)", adjust = "Bonferroni")
+
+# CONCLUSIONS: Significantly different slopes:
+# - Control and:
+#   - CR
+```
+
+### Plot - all data points with generated predictions
+```{r}
+# Create a data frame that contains all possible Day-Group combinations. Each combination will be used as a set of predictors when making a single prediction about mCherry fluorescence based on the model.
+mCherry_fluo_predictors = expand.grid(Day = seq(4, 38, length.out = 35), Group = as.factor(levels(mCherry_low$Group)))
+
+# Generate a data frame with the predictions (and associated SEs) based on the predictors and the model
+mCherry_fluo_predictions = as.data.frame(predict(lm_mCherry_mean_fluo_sqrt, newdata = mCherry_fluo_predictors, type = "response", se.fit = TRUE))
+
+# Combine the two data frames
+mCherry_fluo_predictions = cbind(mCherry_fluo_predictors, mCherry_fluo_predictions)
+
+# Reorder the group levels
+mCherry_fluo_predictions$Group = fct_relevel(mCherry_fluo_predictions$Group, "Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR")
+
+# Plot the predictions with their 95% CIs over the actual data points
+ggplot() +
+  geom_ribbon(data = mCherry_fluo_predictions, aes(x = Day, ymin = (fit - 1.96*se.fit)^2, ymax = (fit + 1.96*se.fit)^2, colour = Group, fill = Group), outline.type = "full", alpha = 0.2, show.legend = FALSE) +
+  geom_point(data = mCherry_low, aes(x = Day, y = Mean, colour = Group)) +
+  geom_line(data = mCherry_fluo_predictions, aes(x = Day, y = fit^2, colour = Group), size = 0.75) +
+  ggtitle("Red autofluorescence values and model predictions by group") +
+  xlab("Day of adulthood") +
+  ylab("Red autofluorescence (pixel intensity)") +
+  facet_wrap(~Group) +
+  scale_x_continuous(expand = c(0, 0), limits = c(-2, 42)) +
+  scale_colour_manual(values = cb_friendly_palette) + 
+  scale_fill_manual(values = cb_friendly_palette) + 
+  theme_bw() +
+  theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5), 
+        axis.text = element_text(size = 10), 
+        axis.title = element_text(size = 12), 
+        axis.title.x = element_text(vjust = -1), 
+        axis.title.y = element_text(vjust = 3), 
+        legend.title = element_blank())
+```
+
+##### Construct and plot a matrix with the p-values for all pairwise group comparisons of slopes
+```{r}
+# Extract exact p-values
+summary(mCherry_mean_fluo_slope_diff_adj_pval$contrasts)$p.value
+
+p_val_mCherry_mean_fluo_slope_diff = matrix(
+  # Sequence of p-values
+  c(NA, 1, 1, 0.009608416, 1, 1, 0.180491035, 0.057717573, 
+    NA, NA, 1, 0.094045443, 1, 1, 1, 0.589744386, 
+    NA, NA, NA, 1, 1, 1, 1, 1, 
+    NA, NA, NA, NA, 1, 1, 1, 1, 
+    NA, NA, NA, NA, NA, 1, 1, 1, 
+    NA, NA, NA, NA, NA, NA, 1, 1, 
+    NA, NA, NA, NA, NA, NA, NA, 1, 
+    NA, NA, NA, NA, NA, NA, NA, NA),
+  nrow = 8, # Number of rows
+  ncol = 8 # Number of columns   
+)
+
+# Name the rows
+rownames(p_val_mCherry_mean_fluo_slope_diff) = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR")
+
+# Name the columns
+colnames(p_val_mCherry_mean_fluo_slope_diff) = c("Control", "MET", "NMN", "CR", "MET + NMN", "MET + CR", "NMN + CR", "MET + NMN + CR")
+
+# Print out the 8x8 matrix
+cat("The 8x8 matrix:\n")
+print(p_val_mCherry_mean_fluo_slope_diff)
+
+# Transform the matrix into a data frame
+p_val_mCherry_fluo_melt = melt.matrix(p_val_mCherry_mean_fluo_slope_diff)
+
+# Convert the group names into factors
+p_val_mCherry_fluo_melt$X1 = as.factor(p_val_mCherry_fluo_melt$X1)
+p_val_mCherry_fluo_melt$X2 = as.factor(p_val_mCherry_fluo_melt$X2)
+
+# Create a new column that categorises the p-values
+p_val_mCherry_fluo_melt$value_cat = cut(p_val_mCherry_fluo_melt$value, 
+                                    breaks = c(0, 0.0001, 0.001, 0.01, 0.05, 1), 
+                                    right = TRUE)
+
+# Add a space between the numbers denoting the interval categories
+p_val_mCherry_fluo_melt$value_cat = str_replace_all(p_val_mCherry_fluo_melt$value_cat, ",", ", ")
+
+# Assign all the comparisons for which a p-value of 0 was provided (and hence had NAs assigned to them in the new column) the level " " in the new column
+p_val_mCherry_fluo_melt[is.na(p_val_mCherry_fluo_melt$value_cat), ]$value_cat = " "
+
+# Convert back to factor (as the above manipulations changed it to character) and re-specify the factor levels
+p_val_mCherry_fluo_melt$value_cat = factor(p_val_mCherry_fluo_melt$value_cat, 
+                                       levels = c("(0, 0.0001]", 
+                                                  "(0.0001, 0.001]", 
+                                                  "(0.001, 0.01]", 
+                                                  "(0.01, 0.05]", 
+                                                  "(0.05, 1]", 
+                                                  " "))
+
+# Convert the precise p-values into scientific format with one decimal place
+p_val_mCherry_fluo_melt$value = format(p_val_mCherry_fluo_melt$value, format = "e", digits = 2)
+
+# Plot the p-values
+ggplot(p_val_mCherry_fluo_melt, aes(X1, X2)) +
+  geom_tile(aes(fill = value_cat), color = "white", size = 0.5) +
+  geom_text(aes(label = value), size = 3, colour = "white") +
+  scale_fill_manual(values = cb_friendly_p_val, drop = FALSE) +
+  labs(fill = "p-value") +
+  ggtitle("P-values for comparisons\nbetween rates of increase in red autofluorescence") +
+  theme(axis.line = element_blank(), 
+        axis.text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), 
+        axis.ticks = element_blank(), 
+        axis.title = element_blank(), 
+        legend.key = element_rect(fill = "white"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        plot.title = element_text(face = "bold", hjust = 0.5, size = 14))
+```
